@@ -8,6 +8,8 @@ import sys
 from server_pool import ServerPool
 import Config
 
+email_list = []
+
 class DbTransfer(object):
 
     instance = None
@@ -78,7 +80,7 @@ class DbTransfer(object):
         conn = cymysql.connect(host=Config.MYSQL_HOST, port=Config.MYSQL_PORT, user=Config.MYSQL_USER,
                                passwd=Config.MYSQL_PASS, db=Config.MYSQL_DB, charset='utf8')
         cur = conn.cursor()
-        cur.execute("SELECT port, u, d, transfer_enable, passwd, switch, enable, reg_date, end_date FROM user")
+        cur.execute("SELECT port, u, d, transfer_enable, passwd, switch, enable, reg_date, end_date, uid FROM user")
         rows = []
         for r in cur.fetchall():
             rows.append(list(r))
@@ -88,10 +90,13 @@ class DbTransfer(object):
 
     @staticmethod
     def del_server_out_of_bound_safe(rows):
-    #停止超流量的服务
-    #启动没超流量的服务
-    #修改下面的逻辑要小心包含跨线程访问
+        #停止超流量的服务
+        #启动没超流量的服务
+        #修改下面的逻辑要小心包含跨线程访问
+
+        global email_list
         for row in rows:
+            # 收集需要发送邮件的用户id
             if ServerPool.get_instance().server_is_run(row[0]) is True:
                 if row[5] == 0 or row[6] == 0:
                     #stop disable or switch off user
@@ -99,10 +104,12 @@ class DbTransfer(object):
                     ServerPool.get_instance().del_server(row[0])
                 elif row[1] + row[2] >= row[3]:
                     #stop out bandwidth user
+                    email_list.append(row[9])
                     logging.info('db stop server at port [%s] reason: out bandwidth' % (row[0]))
                     ServerPool.get_instance().del_server(row[0])
                 if row[8] != "" and row[8] < datetime.datetime.now():
                     #stop out bandwidth user
+                    email_list.append(row[9])
                     logging.info('db stop server at port [%s] reason: end_date < %s' % (row[0], datetime.datetime.now()))
                     ServerPool.get_instance().del_server(row[0])
 
@@ -114,6 +121,9 @@ class DbTransfer(object):
                 if row[5] == 1 and row[6] == 1 and row[1] + row[2] < row[3] and row[8] != "" and row[8] > datetime.datetime.now():
                     logging.info('db start server at port [%s] pass [%s]' % (row[0], row[4]))
                     ServerPool.get_instance().new_server(row[0], row[4])
+                else:
+                    email_list.append(row[9])
+        logging.info("self.email_list == %s "% email_list)
 
     @staticmethod
     def thread_db():
@@ -130,8 +140,24 @@ class DbTransfer(object):
             except Exception as e:
                 logging.warn('db thread except:%s' % e)
             finally:
+                DbTransfer.email_user()
                 time.sleep(15)
 
+    @staticmethod
+    def email_user():
+        global email_list
+        # 将需要发送邮件的用户ID写入数据库
+        email_list = list(set(email_list))
+        conn = cymysql.connect(host=Config.MYSQL_HOST, port=Config.MYSQL_PORT, user=Config.MYSQL_USER,
+                               passwd=Config.MYSQL_PASS, db=Config.MYSQL_DB, charset='utf8')
+        cur = conn.cursor()
+        for uid in email_list:
+            email_sql = 'Insert ignore into email (uid) values (%s);' % uid
+            cur.execute(email_sql)
+        cur.close()
+        conn.commit()
+        conn.close()
+        email_list = []
 
 #SQLData.pull_db_all_user()
 #print DbTransfer.get_instance().test()
