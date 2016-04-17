@@ -123,7 +123,6 @@ class DbTransfer(object):
                     ServerPool.get_instance().new_server(row[0], row[4])
                 else:
                     email_list.append(row[9])
-        logging.info("self.email_list == %s "% email_list)
 
     @staticmethod
     def thread_db():
