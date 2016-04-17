@@ -24,10 +24,15 @@ class Email():
 	def fetchall(self, sql):
 		self.cur.execute(sql)
 		ret = self.cur.fetchall()
-		self.cur.close()
 		return ret
 
-   	def send(self, email_list):
+	def execute(self, uid_list):
+		format_strings = ','.join(['%s'] * len(uid_list))
+		sql = "UPDATE email set is_send=1 where uid in (%s)"
+		self.cur.execute(sql % format_strings, tuple(uid_list))
+		self.conn.commit()
+
+   	def send(self, email_list, uid_list):
 		xsmtpapi = {'to': []}
 		for email in email_list:
 			xsmtpapi['to'].append(email)
@@ -41,18 +46,20 @@ class Email():
 			"templateInvokeName" : "time_out",
 		}
 		r = requests.post(url, data=params)
-		print t.text
+		result = json.loads(r.text)
+		
+		if result['result'] == True:
+			self.execute(uid_list)
 
 	def user_list(self):
-		print "sssss"
-		sql = "SELECT u.email FROM email e inner join user u on e.uid=u.uid where is_send=0"
+		sql = "SELECT u.email, u.uid FROM email e inner join user u on e.uid=u.uid where is_send=0"
 		data_list = self.fetchall(sql)
-		data_list = [d[0] for d in data_list]
-		return data_list
+
+		email_list = [d[0] for d in data_list]
+		uid_list = [d[1] for d in data_list]
+		return email_list, uid_list
 
 if __name__ == '__main__':
 	email = Email()
-	# user_list = email.user_list()
-	# print "user_list == ", user_list
-	user_list = ['309871271@qq.com']
-	email.send(user_list)
+	user_list, uid_list = email.user_list()
+	email.send(user_list, uid_list)
